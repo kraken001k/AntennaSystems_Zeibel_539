@@ -19,14 +19,14 @@ WAVELENGTH = 0.035 # Довжина хвилі у вільному просто�
 LENGTH = 0.237 # Довжина діелектричного стрижня: 23,7 см.
 DIAMETER = 0.023 # Діаметр стрижня: 2,3 см.
 SPACING = 0.12 # Відстань між осями двох стрижнів: 12 см.
-XI = 1.30  # Коефіцієнт сповільнення хвилі; прийняте наближене значення.
+XI = 1 + WAVELENGTH / (2 * LENGTH)  # Коефіцієнт сповільнення хвилі.
 LEVEL = 0.707 # Амплітудний рівень для визначення ширини головної пелюстки.
 OUT = Path(__file__).resolve().parent
 SHOW_PLOTS = True  # False лише зберегти файли, не відкривати вікна
 
 
 def lambda1(x):
-    """Обчислити Λ_1(x) = 2J_1(x)/x, де J_2 - функція Бесселя першого роду.
+    """Обчислити Λ_1(x) = 2J_1(x)/x, де J_1 - функція Бесселя першого роду.
     У точці x = 0 використовується граничне значення Λ_1(0) = 1.
     Маска where запобігає діленню на нуль і нестійкості поблизу нуля.
     """
@@ -42,11 +42,12 @@ def raw_pattern(theta, rods=1, plane='H'):
     plane задає площину розрахунку H або E.
     """
     theta = np.asarray(theta, dtype=float)
-    # Аргументи множників, що враховують довжину та поперечний розмір стрижня.
-    t = LENGTH/WAVELENGTH*(XI-np.cos(theta))
-    z = np.pi*DIAMETER/WAVELENGTH*np.sin(theta)
-    # Постійний множник скорочується після нормування за максимумом.
-    value = np.sinc(t)*lambda1(z)
+    # Множник біжучої хвилі вздовж стрижня
+    A = np.pi * LENGTH / WAVELENGTH
+    B = ((XI - 1) / np.sin(A * (XI - 1)) * np.sin(A * (XI - np.cos(theta))) / (XI - np.cos(theta)))
+    # Вплив поперечного розміру стрижня
+    z = np.pi * DIAMETER / WAVELENGTH * np.sin(theta)
+    value = B * lambda1(z)
     # У площині E діаграма містить додатковий множник cos(theta).
     if plane == 'E':
         value = value*np.cos(theta)
@@ -172,11 +173,13 @@ def make_plots(results):
                 ax.scatter(sign*np.array(r['zeros']),np.zeros(len(r['zeros'])),marker='x',color='black',s=25,zorder=5)
                 ax.scatter([sign*p['angle'] for p in r['peaks']],
                            [p['amplitude'] for p in r['peaks']],color='darkgreen',s=20,zorder=4)
-                lo,hi=sorted([sign*r['left'],sign*r['right']])
-                ax.scatter([lo,hi],[LEVEL]*2,color=color,s=23,zorder=6)
-                ax.vlines([lo,hi],0,LEVEL,color=color,ls=':',lw=.8)
-                ax.annotate('',xy=(hi,LEVEL),xytext=(lo,LEVEL),
-                            arrowprops={'arrowstyle':'<->','color':color,'lw':1.3})
+                if r['main_angle'] != 0 or sign == -1:
+                    lo, hi = sorted([sign * r['left'], sign * r['right']])
+                    ax.scatter([lo, hi], [LEVEL] * 2, color=color, s=23, zorder=6)
+                    ax.vlines([lo, hi], 0, LEVEL, color=color, ls=':', lw=.8)
+                    ax.annotate('', xy=(hi, LEVEL), xytext=(lo, LEVEL),
+                                arrowprops={'arrowstyle': '<->', 'color': color, 'lw': 1.3})
+
             mid=(r['left']+r['right'])/2
             ax.annotate(f'Δθ = {r["width"]:.2f}°',xy=(mid,LEVEL),xytext=(mid+12,.86),
                         ha='center',color=color,fontsize=10,
@@ -186,18 +189,19 @@ def make_plots(results):
             ax.set_title(f'{rods} стрижень, площина {r["plane"]}' if rods==1 else f'2 стрижні, площина {r["plane"]}')
             ax.set_xticks(np.arange(-90,91,15));ax.grid(ls='--',alpha=.35)
             ax.legend(loc='upper left',fontsize=9)
-        fig.suptitle(f'ДСА, варіант 4: λ = 3,5 см; ξ ≈ {XI:.2f}'+('; h = 12 см' if rods==2 else ''),fontsize=12)
+        fig.suptitle(f'ДСА, варіант 4: λ = 3,5 см; ξ ≈ {XI:.6f}'+('; h = 12 см' if rods==2 else ''),fontsize=12)
         fig.savefig(OUT/f'{rods}rod_rectangular.png',dpi=300)
         figp,axes=plt.subplots(1,2,figsize=(11,5),subplot_kw={'projection':'polar'})
         for ax,r,color in zip(axes,subset,('royalblue','crimson')):
             ax.plot(theta,normalized(theta,r),color=color,lw=1.2)
             for sign in (-1,1):
-                lo,hi=sorted([sign*r['left'],sign*r['right']])
-                ax.plot(np.radians(np.linspace(lo,hi,100)),np.full(100,LEVEL),color=color,lw=2)
-                ax.scatter(np.radians([lo,hi]),[LEVEL]*2,s=18,color=color,zorder=5)
-                ax.scatter(np.radians(sign*np.array(r['zeros'])),np.zeros(len(r['zeros'])),marker='x',s=20,color='black')
-                ax.scatter(np.radians([sign*p['angle'] for p in r['peaks']]),
-                           [p['amplitude'] for p in r['peaks']],s=15,color='darkgreen',zorder=4)
+                if r['main_angle'] != 0 or sign == -1:
+                    lo, hi = sorted([sign * r['left'], sign * r['right']])
+                    ax.plot(np.radians(np.linspace(lo, hi, 100)), np.full(100, LEVEL), color=color, lw=2)
+                    ax.scatter(np.radians([lo, hi]), [LEVEL] * 2, s=18, color=color, zorder=5)
+
+                ax.scatter(np.radians(sign * np.array(r['zeros'])), np.zeros(len(r['zeros'])), marker='x', s=20, color='black')
+                ax.scatter(np.radians([sign * p['angle'] for p in r['peaks']]), [p['amplitude'] for p in r['peaks']],s=15, color='darkgreen', zorder=4)
             ax.set_theta_zero_location('N');ax.set_theta_direction(-1)
             ax.set_thetamin(-90);ax.set_thetamax(90);ax.set_thetagrids(range(-90,91,30))
             ax.set_ylim(0,1.05);ax.set_yticks([.25,.5,.75,1]);ax.set_yticklabels([])
@@ -214,10 +218,10 @@ def make_plots(results):
 
 def main():
     results=[analyse(n,p) for n in (1,2) for p in ('H','E')]
-    print(f'λ = {WAVELENGTH*100:.1f} см; l = {LENGTH*100:.1f} см; h = {SPACING*100:.1f} см; ξ ≈ {XI:.2f}')
+    print(f'λ = {WAVELENGTH*100:.1f} см; l = {LENGTH*100:.1f} см; h = {SPACING*100:.1f} см; ξ ≈ {XI:.6f}')
     for r in results:
-        print(f'{r["rods"]} стрижні, {r["plane"]}: θmax = ±{r["main_angle"]:.4f}°; '
-              f'межі додатної головної пелюстки [{r["left"]:.4f}°, {r["right"]:.4f}°]; '
+        print(f'{r["rods"]} стрижні, {r["plane"]}: θmax = {r["main_angle"]:.4f}°; '
+              f'межі головної пелюстки [{r["left"]:.4f}°, {r["right"]:.4f}°]; '
               f'ширина = {r["width"]:.4f}°; F(0) = {r["axis"]:.6f}')
         for p in r['peaks']:
             print(f'  {p["angle"]:.4f}° | F={p["amplitude"]:.6f} | {p["db"]:.2f} дБ | '
